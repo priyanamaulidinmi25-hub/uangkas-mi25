@@ -235,7 +235,7 @@ function listenDataKas() {
   });
 }
 
-// MEMINDAHKAN TRANSAKSI KE BERKAS SAMPAH (TIDAK LANGSUNG DIHAPUS PERMANEN)
+// MEMINDAHKAN TRANSAKSI KE BERKAS SAMPAH
 window.moveToTrashKas = async (kasId) => {
   if (confirm("Pindahkan transaksi ini ke Berkas Sampah?")) {
     try {
@@ -311,7 +311,7 @@ window.deletePermanenKas = async (sampahId) => {
   }
 };
 
-// LOGIKA MULTI REKENING & QRIS
+// LOGIKA MULTI REKENING & QRIS (DENGAN HANDLER GAMBAR PECAH)
 function listenMultiRekening() {
   db.collection("rekening").orderBy("created_at", "asc").onSnapshot((snapshot) => {
     const container = document.getElementById("list-rekening");
@@ -333,12 +333,14 @@ function listenMultiRekening() {
 
       let qrisHtml = item.qris_url ? `
         <div style="text-align:center; margin-top:8px;">
-          <img src="${item.qris_url}" style="width:140px; height:140px; border-radius:8px; border:1px solid #e5e7eb; object-fit:cover;">
-          <div><a href="${item.qris_url}" download="QRIS_${item.bank}.png" style="font-size:11px; color:#2563eb; font-weight:bold;">📥 Download QRIS</a></div>
+          <img src="${item.qris_url}" 
+               onerror="this.onerror=null; this.src='https://via.placeholder.com/150?text=Gambar+QR+Tidak+Valid';"
+               style="width:140px; height:140px; border-radius:8px; border:1px solid #e5e7eb; object-fit:cover;">
+          <div><a href="${item.qris_url}" target="_blank" download="QRIS_${item.bank}.png" style="font-size:11px; color:#2563eb; font-weight:bold;">📥 Download / Buka QRIS</a></div>
         </div>` : '';
 
       container.innerHTML += `
-        <div class="bank-card">
+        <div class="bank-card" style="border:1px solid #e5e7eb; padding:12px; border-radius:12px; margin-bottom:8px; background:#fff;">
           <div style="width:100%;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <p style="font-weight:bold; font-size:13px; color:#1f2937;">🏦 ${item.bank}</p>
@@ -421,9 +423,7 @@ window.submitAbsen = async (acaraId, status) => {
   alert(`Absensi disimpan: ${status}`);
 };
 
-// ==========================================
-// LOGIKA VERIFIKASI SETORAN PENDING (KHUSUS BENDAHARA/ADMIN)
-// ==========================================
+// LOGIKA VERIFIKASI SETORAN PENDING
 function listenSetoranPending() {
   const container = document.getElementById("list-verifikasi");
   const section = document.getElementById("section-verifikasi");
@@ -471,7 +471,6 @@ window.terimaSetoran = async (docId, nama, nominal) => {
   if (!confirm(`Terima setoran kas sebesar Rp ${Number(nominal).toLocaleString('id-ID')} dari ${nama}?`)) return;
 
   try {
-    // 1. Tambah ke kas utama
     await db.collection("kas").add({
       tipe: "pemasukan",
       pembayarNama: nama,
@@ -480,7 +479,6 @@ window.terimaSetoran = async (docId, nama, nominal) => {
       tanggal: new Date().toISOString()
     });
 
-    // 2. Tandai setoran_pending selesai
     await db.collection("setoran_pending").doc(docId).update({
       status: "diterima"
     });
@@ -522,7 +520,6 @@ if (document.getElementById("btn-close-modal")) {
   document.getElementById("btn-close-modal").onclick = () => modalContainer.classList.add("hidden");
 }
 
-// Event Tombol "Upload Bukti" Bayar Online untuk Mahasiswa
 if (document.getElementById("btn-bayar-online")) {
   document.getElementById("btn-bayar-online").onclick = () => {
     activeModalType = "bayar_online";
@@ -592,7 +589,12 @@ if (document.getElementById("btn-admin-qris")) {
       <div class="form-group"><label>Nama Bank / E-Wallet</label><input type="text" id="m-bank" placeholder="Contoh: BCA / DANA / QRIS" required class="form-control"></div>
       <div class="form-group"><label>Nomor Rekening / HP</label><input type="text" id="m-rek" required class="form-control"></div>
       <div class="form-group"><label>Atas Nama (Pemilik)</label><input type="text" id="m-pemilik" placeholder="Contoh: Bendahara MI25" class="form-control"></div>
-      <div class="form-group"><label>URL Gambar QRIS (Opsional)</label><input type="text" id="m-qris-url" class="form-control"></div>`;
+      <div class="form-group">
+        <label>Upload Foto QRIS dari HP</label>
+        <input type="file" id="m-qris-file" accept="image/*" class="form-control" style="margin-bottom:6px;">
+        <label style="font-size:11px; color:#6b7280;">Atau Masukkan URL Link Gambar (Opsional):</label>
+        <input type="text" id="m-qris-url" placeholder="https://i.ibb.co/..." class="form-control">
+      </div>`;
     modalContainer.classList.remove("hidden");
   };
 }
@@ -673,14 +675,33 @@ if (modalForm) {
       btnTriggerWA.onclick = () => window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesanWA)}`, '_blank');
 
     } else if (activeModalType === "qris") {
-      await db.collection("rekening").add({
-        bank: document.getElementById("m-bank").value,
-        rekening: document.getElementById("m-rek").value,
-        pemilik: document.getElementById("m-pemilik").value,
-        qris_url: document.getElementById("m-qris-url").value,
-        created_at: new Date().toISOString()
-      });
-      modalContainer.classList.add("hidden");
+      const bank = document.getElementById("m-bank").value;
+      const rek = document.getElementById("m-rek").value;
+      const pemilik = document.getElementById("m-pemilik").value;
+      let qrisUrl = document.getElementById("m-qris-url").value.trim();
+      const fileInput = document.getElementById("m-qris-file").files[0];
+
+      const simpanKeDb = async (urlGambar) => {
+        await db.collection("rekening").add({
+          bank: bank,
+          rekening: rek,
+          pemilik: pemilik,
+          qris_url: urlGambar,
+          created_at: new Date().toISOString()
+        });
+        modalContainer.classList.add("hidden");
+        alert("Rekening / QRIS berhasil disimpan!");
+      };
+
+      if (fileInput) {
+        const reader = new FileReader();
+        reader.onload = async function(evt) {
+          await simpanKeDb(evt.target.result);
+        };
+        reader.readAsDataURL(fileInput);
+      } else {
+        await simpanKeDb(qrisUrl);
+      }
     }
   });
 }
