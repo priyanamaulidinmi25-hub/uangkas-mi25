@@ -92,12 +92,13 @@ document.addEventListener("DOMContentLoaded", () => {
       listenDataKas();
       listenBeritaAcara();
       listenMultiRekening();
+      listenSetoranPending();
 
       if (currentUserData.role === "admin") {
-        document.getElementById("section-sampah").classList.remove("hidden");
+        document.getElementById("section-sampah")?.classList.remove("hidden");
         listenSampahKas();
       } else {
-        document.getElementById("section-sampah").classList.add("hidden");
+        document.getElementById("section-sampah")?.classList.add("hidden");
       }
     } else {
       currentUser = null;
@@ -194,7 +195,7 @@ function listenDataKas() {
       if (isPassFilter) {
         const isMasuk = item.tipe === "pemasukan";
         const pembayarInfo = item.pembayarNama ? `<span style="font-size:10px; color:#2563eb; background:#eff6ff; padding:1px 6px; border-radius:4px; font-weight:bold;">Dari: ${item.pembayarNama}</span>` : '';
-        const btnHapusKas = isAdminOrMod ? `<button onclick="moveToTrashKas('${id}')" style="background:none; border:none; color:#ef4444; font-size:12px; cursor:pointer; margin-left:8px;" title="Hapus ke Sampah">🗑️️</button>` : '';
+        const btnHapusKas = isAdminOrMod ? `<button onclick="moveToTrashKas('${id}')" style="background:none; border:none; color:#ef4444; font-size:12px; cursor:pointer; margin-left:8px;" title="Hapus ke Sampah">🗑</button>` : '';
 
         listContainer.innerHTML += `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f3f4f6; font-size:12px;">
@@ -420,6 +421,94 @@ window.submitAbsen = async (acaraId, status) => {
   alert(`Absensi disimpan: ${status}`);
 };
 
+// ==========================================
+// LOGIKA VERIFIKASI SETORAN PENDING (KHUSUS BENDAHARA/ADMIN)
+// ==========================================
+function listenSetoranPending() {
+  const container = document.getElementById("list-verifikasi");
+  const section = document.getElementById("section-verifikasi");
+  if (!container) return;
+
+  db.collection("setoran_pending")
+    .where("status", "==", "pending")
+    .onSnapshot((snapshot) => {
+      const isAdminOrMod = currentUserData && (currentUserData.role === "admin" || currentUserData.role === "moderator");
+
+      if (snapshot.empty || !isAdminOrMod) {
+        container.innerHTML = `<p style="font-size: 12px; color: #9ca3af; text-align: center;">Tidak ada setoran baru.</p>`;
+        if (section) section.classList.add("hidden");
+        return;
+      }
+
+      if (section) section.classList.remove("hidden");
+
+      let html = "";
+      snapshot.forEach((docSnap) => {
+        const item = docSnap.data();
+        const id = docSnap.id;
+        html += `
+          <div class="verify-item">
+            <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 13px;">
+              <span>👤 ${item.namaMahasiswa}</span>
+              <span style="color: #16a34a;">Rp ${Number(item.nominal).toLocaleString('id-ID')}</span>
+            </div>
+            <p style="font-size: 10px; color: #6b7280; margin: 4px 0 8px 0;">
+              📅 ${new Date(item.tanggal).toLocaleString('id-ID')}
+            </p>
+            <img src="${item.buktiGambar}" alt="Bukti Transfer" style="width: 100%; max-height: 200px; object-fit: contain; border-radius: 8px; margin-bottom: 8px; border: 1px solid #e5e7eb; background: #fff;">
+            <div style="display: flex; gap: 6px;">
+              <button onclick="terimaSetoran('${id}', '${item.namaMahasiswa}', ${item.nominal})" class="btn-success" style="flex: 1;">ACC & Tambah Kas ✅</button>
+              <button onclick="tolakSetoran('${id}')" class="btn-danger" style="flex: 1;">Tolak ❌</button>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    });
+}
+
+window.terimaSetoran = async (docId, nama, nominal) => {
+  if (!confirm(`Terima setoran kas sebesar Rp ${Number(nominal).toLocaleString('id-ID')} dari ${nama}?`)) return;
+
+  try {
+    // 1. Tambah ke kas utama
+    await db.collection("kas").add({
+      tipe: "pemasukan",
+      pembayarNama: nama,
+      nominal: Number(nominal),
+      keterangan: "Iuran Kas (Transfer QRIS/Bank)",
+      tanggal: new Date().toISOString()
+    });
+
+    // 2. Tandai setoran_pending selesai
+    await db.collection("setoran_pending").doc(docId).update({
+      status: "diterima"
+    });
+
+    const pesanApresiasi = `Makasih ya ${nama} sudah bayar kas 😁\nSemoga rezekinya lancar terus 😇`;
+    alert(`🎉 SETORAN DITERIMA!\n\n"${pesanApresiasi}"`);
+
+    if (confirm("Kirim ucapan terima kasih ke grup/kontak WhatsApp?")) {
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesanApresiasi)}`, '_blank');
+    }
+  } catch (err) {
+    alert("Gagal memproses setoran: " + err.message);
+  }
+};
+
+window.tolakSetoran = async (docId) => {
+  if (!confirm("Tolak bukti pembayaran ini?")) return;
+
+  try {
+    await db.collection("setoran_pending").doc(docId).update({
+      status: "ditolak"
+    });
+    alert("Setoran berhasil ditolak.");
+  } catch (err) {
+    alert("Gagal menolak setoran: " + err.message);
+  }
+};
+
 // MODAL CONTROLLER
 const modalContainer = document.getElementById("modal-container");
 const modalTitle = document.getElementById("modal-title");
@@ -433,20 +522,47 @@ if (document.getElementById("btn-close-modal")) {
   document.getElementById("btn-close-modal").onclick = () => modalContainer.classList.add("hidden");
 }
 
+// Event Tombol "Upload Bukti" Bayar Online untuk Mahasiswa
+if (document.getElementById("btn-bayar-online")) {
+  document.getElementById("btn-bayar-online").onclick = () => {
+    activeModalType = "bayar_online";
+    modalTitle.innerText = "💸 Upload Bukti Bayar Kas";
+    modalShareWA.classList.add("hidden");
+
+    const namaDefault = currentUserData ? currentUserData.nama : "";
+
+    modalFields.innerHTML = `
+      <div class="form-group">
+        <label>Nama Mahasiswa</label>
+        <input type="text" id="setor-nama" class="form-control" value="${namaDefault}" required placeholder="Nama Pembayar">
+      </div>
+      <div class="form-group">
+        <label>Nominal Pembayaran (Rp)</label>
+        <input type="number" id="setor-nominal" class="form-control" placeholder="Contoh: 10000" required>
+      </div>
+      <div class="form-group">
+        <label>Foto / Screenshot Bukti Transfer</label>
+        <input type="file" id="setor-file" class="form-control" accept="image/*" required>
+      </div>
+    `;
+    modalContainer.classList.remove("hidden");
+  };
+}
+
 if (document.getElementById("btn-admin-kas")) {
   document.getElementById("btn-admin-kas").onclick = () => {
     activeModalType = "kas";
-    modalTitle.innerText = "Catat Transaksi Kas";
+    modalTitle.innerText = "Catat Transaksi Kas Manual";
     modalShareWA.classList.add("hidden");
 
-    let optionsUser = `<option value="">-- Bukan Iuran Pemuda / Kas Umum --</option>`;
+    let optionsUser = `<option value="">-- Bukan Iuran Anggota / Kas Umum --</option>`;
     Object.values(allUsersMap).forEach(nama => {
       optionsUser += `<option value="${nama}">${nama}</option>`;
     });
 
     modalFields.innerHTML = `
       <div class="form-group"><label>Jenis Transaksi</label><select id="m-tipe" class="form-control"><option value="pemasukan">Pemasukan (+)</option><option value="pengeluaran">Pengeluaran (-)</option></select></div>
-      <div class="form-group"><label>Nama Pembayar / Pemuda (Khusus Pemasukan)</label><select id="m-pembayar" class="form-control">${optionsUser}</select></div>
+      <div class="form-group"><label>Nama Pembayar (Khusus Pemasukan)</label><select id="m-pembayar" class="form-control">${optionsUser}</select></div>
       <div class="form-group"><label>Nominal (Rp)</label><input type="number" id="m-nominal" required class="form-control"></div>
       <div class="form-group"><label>Keterangan Transaksi</label><input type="text" id="m-keterangan" required placeholder="Contoh: Uang Iuran Mingguan" class="form-control"></div>`;
     modalContainer.classList.remove("hidden");
@@ -475,7 +591,7 @@ if (document.getElementById("btn-admin-qris")) {
     modalFields.innerHTML = `
       <div class="form-group"><label>Nama Bank / E-Wallet</label><input type="text" id="m-bank" placeholder="Contoh: BCA / DANA / QRIS" required class="form-control"></div>
       <div class="form-group"><label>Nomor Rekening / HP</label><input type="text" id="m-rek" required class="form-control"></div>
-      <div class="form-group"><label>Atas Nama (Pemilik)</label><input type="text" id="m-pemilik" placeholder="Contoh: Bendahara Pemuda" class="form-control"></div>
+      <div class="form-group"><label>Atas Nama (Pemilik)</label><input type="text" id="m-pemilik" placeholder="Contoh: Bendahara MI25" class="form-control"></div>
       <div class="form-group"><label>URL Gambar QRIS (Opsional)</label><input type="text" id="m-qris-url" class="form-control"></div>`;
     modalContainer.classList.remove("hidden");
   };
@@ -484,7 +600,35 @@ if (document.getElementById("btn-admin-qris")) {
 if (modalForm) {
   modalForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (activeModalType === "kas") {
+
+    if (activeModalType === "bayar_online") {
+      const nama = document.getElementById("setor-nama").value;
+      const nominal = Number(document.getElementById("setor-nominal").value);
+      const fileInput = document.getElementById("setor-file").files[0];
+
+      if (!fileInput) { alert("Pilih foto bukti transfer terlebih dahulu!"); return; }
+
+      const reader = new FileReader();
+      reader.onload = async function(evt) {
+        const base64Image = evt.target.result;
+        try {
+          await db.collection("setoran_pending").add({
+            namaMahasiswa: nama,
+            nominal: nominal,
+            buktiGambar: base64Image,
+            status: "pending",
+            tanggal: new Date().toISOString()
+          });
+
+          alert("Bukti pembayaran berhasil diunggah! Menunggu verifikasi bendahara.");
+          modalContainer.classList.add("hidden");
+        } catch (err) {
+          alert("Gagal mengunggah bukti: " + err.message);
+        }
+      };
+      reader.readAsDataURL(fileInput);
+
+    } else if (activeModalType === "kas") {
       const tipe = document.getElementById("m-tipe").value;
       const pembayarNama = document.getElementById("m-pembayar").value || "";
       const nominal = Number(document.getElementById("m-nominal").value);
@@ -525,8 +669,9 @@ if (modalForm) {
       });
 
       modalShareWA.classList.remove("hidden");
-      const pesanWA = `📢 *BERITA ACARA PEMUDA*\n\n📌 *Acara:* ${judul}\n📅 *Waktu:* ${tgl}\n📍 *Lokasi:* ${lokasi}\n📝 *Detail:* ${deskripsi}\n\nMohon konfirmasi absensi via aplikasi!`;
+      const pesanWA = `📢 *BERITA ACARA KELAS MI25*\n\n📌 *Acara:* ${judul}\n📅 *Waktu:* ${tgl}\n📍 *Lokasi:* ${lokasi}\n📝 *Detail:* ${deskripsi}\n\nMohon konfirmasi absensi via aplikasi!`;
       btnTriggerWA.onclick = () => window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesanWA)}`, '_blank');
+
     } else if (activeModalType === "qris") {
       await db.collection("rekening").add({
         bank: document.getElementById("m-bank").value,
