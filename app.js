@@ -19,6 +19,7 @@ let isRegisterState = false;
 let allUsersMap = {};
 let bannerInterval = null;
 let chartKeuanganInstance = null;
+let lastChartData = { masuk: -1, keluar: -1 };
 
 document.addEventListener("DOMContentLoaded", () => {
   const authSection = document.getElementById("auth-section");
@@ -121,7 +122,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-// SYSTEM TAB NAVIGATION
+// SYSTEM TAB NAVIGATION DI ATAS
 function initTabNavigation() {
   const navButtons = document.querySelectorAll('.nav-item');
   const tabContents = document.querySelectorAll('.tab-content');
@@ -181,7 +182,6 @@ function listenBanners() {
     });
     slider.innerHTML = html;
 
-    // Geser otomatis jika lebih dari 1 banner
     if (count > 1) {
       let currentIndex = 0;
       bannerInterval = setInterval(() => {
@@ -194,16 +194,14 @@ function listenBanners() {
   });
 }
 
-// FETCH DAFTAR ANGGOTA (DENGAN FIX BUG DUPLIKASI KODE)
+// FETCH DAFTAR ANGGOTA
 async function fetchUsersList() {
   db.collection("users").onSnapshot((snapshot) => {
     const container = document.getElementById("list-anggota");
     const countBadge = document.getElementById("total-anggota-count");
     if (!container) return;
 
-    // Mengosongkan container agar tidak terduplikasi saat data ter-update
     container.innerHTML = "";
-    
     let totalCount = 0;
     allUsersMap = {};
 
@@ -231,7 +229,7 @@ async function fetchUsersList() {
   });
 }
 
-// LOGIKA TRANSAKSI KAS, STATUS IURAN & CHART VISUAL
+// LOGIKA TRANSAKSI KAS & CHART
 function listenDataKas() {
   db.collection("kas").orderBy("tanggal", "desc").onSnapshot((snapshot) => {
     let totalMasuk = 0, totalKeluar = 0;
@@ -291,10 +289,13 @@ function listenDataKas() {
     document.getElementById("total-keluar").innerText = `Rp ${totalKeluar.toLocaleString('id-ID')}`;
     document.getElementById("total-kas").innerText = `Rp ${(totalMasuk - totalKeluar).toLocaleString('id-ID')}`;
 
-    // RENDER CHART VISUAL KEUANGAN
-    renderChartKeuangan(totalMasuk, totalKeluar);
+    // RENDER CHART HANYA JIKA ADA PERUBAHAN DATA (MENCEGAH RESIZE BUG SLIDING)
+    if (lastChartData.masuk !== totalMasuk || lastChartData.keluar !== totalKeluar) {
+      lastChartData = { masuk: totalMasuk, keluar: totalKeluar };
+      renderChartKeuangan(totalMasuk, totalKeluar);
+    }
 
-    // RENDER STATUS IURAN LUNAS / NUNGGAK PER MAHASISWA
+    // RENDER STATUS IURAN MAHASISWA
     if (rekapContainer) {
       rekapContainer.innerHTML = "";
       const allMembers = Object.values(allUsersMap);
@@ -328,12 +329,15 @@ function listenDataKas() {
   });
 }
 
-// FUNCTION CHART.JS FINANSIAL
+// PERBAIKAN STABILITAS CHART.JS FINANSIAL
 function renderChartKeuangan(masuk, keluar) {
-  const ctx = document.getElementById('chart-keuangan')?.getContext('2d');
-  if (!ctx) return;
+  const canvas = document.getElementById('chart-keuangan');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
 
-  if (chartKeuanganInstance) chartKeuanganInstance.destroy();
+  if (chartKeuanganInstance) {
+    chartKeuanganInstance.destroy();
+  }
 
   chartKeuanganInstance = new Chart(ctx, {
     type: 'doughnut',
@@ -349,6 +353,7 @@ function renderChartKeuangan(masuk, keluar) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: { duration: 0 }, // Matikan animasi resize berkali-kali
       plugins: {
         legend: { position: 'bottom', labels: { font: { size: 11 } } }
       }
@@ -356,13 +361,13 @@ function renderChartKeuangan(masuk, keluar) {
   });
 }
 
-// FUCTION KIRIM PENGINGAT WA
+// KIRIM PENGINGAT WA
 window.kirimPengingatWA = (nama) => {
   const pesan = `Halo ${nama} 😄\nSekadar mengingatkan untuk iuran kas kelas MI25 ya. Kamu bisa langsung bayar online via QRIS DANA & Upload Bukti di aplikasi kas:\nhttps://uangkasmi25.netlify.app\n\nTerima kasih! 🙏`;
   window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesan)}`, '_blank');
 };
 
-// REPORT BUG FORM SUBMIT
+// REPORT BUG
 document.getElementById('form-report-bug')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const pesan = document.getElementById('bug-pesan').value;
@@ -382,7 +387,6 @@ document.getElementById('form-report-bug')?.addEventListener('submit', async (e)
   }
 });
 
-// LISTEN REPORT BUGS (KHUSUS ADMIN)
 function listenReportBugsAdmin() {
   db.collection("report_bugs").orderBy("tanggal", "desc").onSnapshot((snapshot) => {
     const container = document.getElementById("list-bugs-admin");
@@ -420,7 +424,6 @@ window.selesaiBug = async (bugId) => {
   }
 };
 
-// MEMINDAHKAN TRANSAKSI KE BERKAS SAMPAH
 window.moveToTrashKas = async (kasId) => {
   if (confirm("Pindahkan transaksi ini ke Berkas Sampah?")) {
     try {
@@ -439,7 +442,6 @@ window.moveToTrashKas = async (kasId) => {
   }
 };
 
-// LOG BERKAS SAMPAH (KHUSUS ADMIN)
 function listenSampahKas() {
   db.collection("sampah_kas").orderBy("deletedAt", "desc").onSnapshot((snapshot) => {
     const container = document.getElementById("list-sampah");
@@ -494,7 +496,6 @@ window.deletePermanenKas = async (sampahId) => {
   }
 };
 
-// MULTI REKENING & QRIS
 function listenMultiRekening() {
   db.collection("rekening").orderBy("created_at", "asc").onSnapshot((snapshot) => {
     const container = document.getElementById("list-rekening");
@@ -544,7 +545,6 @@ window.deleteRekening = async (rekId) => {
   }
 };
 
-// BERITA ACARA
 function listenBeritaAcara() {
   db.collection("acara").orderBy("created_at", "desc").onSnapshot((snapshot) => {
     const container = document.getElementById("list-acara");
@@ -606,7 +606,6 @@ window.submitAbsen = async (acaraId, status) => {
   alert(`Absensi disimpan: ${status}`);
 };
 
-// VERIFIKASI SETORAN PENDING
 function listenSetoranPending() {
   const container = document.getElementById("list-verifikasi");
   const section = document.getElementById("section-verifikasi");
@@ -790,7 +789,7 @@ if (document.getElementById("btn-admin-banner")) {
     modalFields.innerHTML = `
       <div class="form-group"><label>Judul / Teks Caption Banner</label><input type="text" id="m-banner-caption" placeholder="Contoh: Agenda Makrab MI25 Pekan Depan!" required class="form-control"></div>
       <div class="form-group">
-        <label>Upload Foto Banner dari HP</label>
+        <label>Upload Foto Banner dari HP (Rasio 16:9)</label>
         <input type="file" id="m-banner-file" accept="image/*" class="form-control">
       </div>`;
     modalContainer.classList.remove("hidden");
@@ -846,12 +845,12 @@ if (modalForm) {
 
       if (tipe === "pemasukan") {
         const namaTarget = pembayarNama ? pembayarNama : "Kawan";
-        const pesanApresiasi = `Makasih ya ${namaTarget} sudah bayar 😁\nSemoga rezekinya lancar terus 😇`;
+        const pesanApresiation = `Makasih ya ${namaTarget} sudah bayar 😁\nSemoga rezekinya lancar terus 😇`;
 
-        alert(`🎉 TRANSAKSI BERHASIL!\n\n"${pesanApresiasi}"`);
+        alert(`🎉 TRANSAKSI BERHASIL!\n\n"${pesanApresiation}"`);
 
         if (confirm("Ingin kirim pesan ucapan terima kasih ini ke WhatsApp?")) {
-          window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesanApresiasi)}`, '_blank');
+          window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesanApresiation)}`, '_blank');
         }
       } else {
         alert("Pengeluaran kas berhasil dicatat!");
