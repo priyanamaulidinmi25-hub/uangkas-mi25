@@ -1,0 +1,541 @@
+// 1. KONFIGURASI FIREBASE
+const firebaseConfig = {
+  apiKey: "AIzaSyAPdpQl0ZYVhQ1h-Ru6hU3R3LAwoKaQxwY",
+  authDomain: "organisasi-pemuda-umpi.firebaseapp.com",
+  projectId: "organisasi-pemuda-umpi",
+  storageBucket: "organisasi-pemuda-umpi.firebasestorage.app",
+  messagingSenderId: "1071806244327",
+  appId: "1:1071806244327:web:12fce82da857830fa6c942",
+  measurementId: "G-XGB4MEJSDH"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let currentUser = null;
+let currentUserData = null;
+let isRegisterState = false;
+let allUsersMap = {};
+
+document.addEventListener("DOMContentLoaded", () => {
+  const authSection = document.getElementById("auth-section");
+  const mainDashboard = document.getElementById("main-dashboard");
+  const authForm = document.getElementById("auth-form");
+  const fieldNama = document.getElementById("field-nama");
+  const authTitle = document.getElementById("auth-title");
+  const btnToggleAuth = document.getElementById("btn-toggle-auth");
+  const btnLogout = document.getElementById("btn-logout");
+  const userRoleBadge = document.getElementById("user-role-badge");
+
+  if (btnToggleAuth) {
+    btnToggleAuth.addEventListener("click", (e) => {
+      e.preventDefault();
+      isRegisterState = !isRegisterState;
+      authTitle.innerText = isRegisterState ? "Daftar Anggota Baru" : "Masuk ke Aplikasi";
+      if (isRegisterState) fieldNama.classList.remove("hidden");
+      else fieldNama.classList.add("hidden");
+
+      document.getElementById("btn-auth-submit").innerText = isRegisterState ? "Daftar" : "Masuk";
+      document.getElementById("auth-toggle-text").innerText = isRegisterState ? "Sudah punya akun?" : "Belum punya akun?";
+      btnToggleAuth.innerText = isRegisterState ? "Masuk" : "Daftar";
+    });
+  }
+
+  if (authForm) {
+    authForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("input-email").value;
+      const password = document.getElementById("input-password").value;
+      const nama = document.getElementById("input-nama").value;
+
+      try {
+        if (isRegisterState) {
+          if (!nama) { alert("Harap isi Nama Lengkap!"); return; }
+          const res = await auth.createUserWithEmailAndPassword(email, password);
+          await db.collection("users").doc(res.user.uid).set({
+            uid: res.user.uid,
+            nama: nama,
+            email: email,
+            role: "anggota",
+            createdAt: new Date().toISOString(),
+            lastLogin: new Date().toISOString()
+          });
+          alert("Pendaftaran berhasil!");
+        } else {
+          await auth.signInWithEmailAndPassword(email, password);
+        }
+      } catch (err) { alert("Gagal: " + err.message); }
+    });
+  }
+
+  if (btnLogout) btnLogout.addEventListener("click", () => auth.signOut());
+
+  auth.onAuthStateChanged(async (user) => {
+    if (user) {
+      currentUser = user;
+      try {
+        await db.collection("users").doc(user.uid).update({ lastLogin: new Date().toISOString() }).catch(() => {});
+        const userDoc = await db.collection("users").doc(user.uid).get();
+        currentUserData = userDoc.exists ? userDoc.data() : { nama: user.email, role: "anggota" };
+      } catch (err) {
+        currentUserData = { nama: user.email, role: "anggota" };
+      }
+
+      authSection.classList.add("hidden");
+      mainDashboard.classList.remove("hidden");
+      btnLogout.classList.remove("hidden");
+      userRoleBadge.innerText = `${currentUserData.nama} (${currentUserData.role})`;
+
+      applyRolePermissions(currentUserData.role);
+      await fetchUsersList();
+      listenDataKas();
+      listenBeritaAcara();
+      listenMultiRekening();
+
+      if (currentUserData.role === "admin") {
+        document.getElementById("section-sampah").classList.remove("hidden");
+        listenSampahKas();
+      } else {
+        document.getElementById("section-sampah").classList.add("hidden");
+      }
+    } else {
+      currentUser = null;
+      currentUserData = null;
+      authSection.classList.remove("hidden");
+      mainDashboard.classList.add("hidden");
+      btnLogout.classList.add("hidden");
+      userRoleBadge.innerText = "Tamu";
+    }
+  });
+});
+
+function applyRolePermissions(role) {
+  const isAdminOrMod = role === "admin" || role === "moderator";
+  const btnKas = document.getElementById("btn-admin-kas");
+  const btnAcara = document.getElementById("btn-admin-acara");
+  const btnQris = document.getElementById("btn-admin-qris");
+
+  if (btnKas) btnKas.classList.toggle("hidden", !isAdminOrMod);
+  if (btnAcara) btnAcara.classList.toggle("hidden", !isAdminOrMod);
+  if (btnQris) btnQris.classList.toggle("hidden", !isAdminOrMod);
+}
+
+// FETCH DAFTAR ANGGOTA & AKTIVITAS LOGIN
+async function fetchUsersList() {
+  db.collection("users").onSnapshot((snapshot) => {
+    const container = document.getElementById("list-anggota");
+    const countBadge = document.getElementById("total-anggota-count");
+    if (!container) return;
+    container.innerHTML = "";
+    
+    let totalCount = 0;
+    allUsersMap = {};
+
+    snapshot.forEach((docSnap) => {
+      totalCount++;
+      const user = docSnap.data();
+      allUsersMap[user.uid] = user.nama;
+
+      const tglLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleDateString("id-ID", { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : "Baru saja";
+
+      container.innerHTML += `
+        <div class="user-item">
+          <div>
+            <p style="font-weight:bold; color:#1f2937;">👤 ${user.nama}</p>
+            <p style="font-size:10px; color:#9ca3af;">${user.email}</p>
+          </div>
+          <div style="text-align:right;">
+            <span style="font-size:10px; background:#f3f4f6; color:#4b5563; padding:2px 6px; border-radius:4px; font-weight:bold;">${user.role}</span>
+            <p style="font-size:9px; color:#10b981; margin-top:2px;">Aktif: ${tglLogin}</p>
+          </div>
+        </div>`;
+    });
+
+    if (countBadge) countBadge.innerText = `${totalCount} Orang`;
+  });
+}
+
+// LOGIKA TRANSAKSI KAS & REKAP 30 HARI
+function listenDataKas() {
+  db.collection("kas").orderBy("tanggal", "desc").onSnapshot((snapshot) => {
+    let totalMasuk = 0, totalKeluar = 0;
+    const listContainer = document.getElementById("list-transaksi");
+    const rekapContainer = document.getElementById("list-rekap-30hari");
+    if (!listContainer) return;
+    listContainer.innerHTML = "";
+
+    const filter = document.getElementById("filter-periode") ? document.getElementById("filter-periode").value : "semua";
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+    const isAdminOrMod = currentUserData && (currentUserData.role === "admin" || currentUserData.role === "moderator");
+
+    let rekapPemudaMap = {};
+
+    snapshot.forEach((docSnap) => {
+      const item = docSnap.data();
+      const id = docSnap.id;
+      const itemDate = new Date(item.tanggal);
+
+      if (item.tipe === "pemasukan") {
+        totalMasuk += Number(item.nominal);
+        if (itemDate >= thirtyDaysAgo) {
+          const pembayar = item.pembayarNama || "Anonim/Umum";
+          rekapPemudaMap[pembayar] = (rekapPemudaMap[pembayar] || 0) + Number(item.nominal);
+        }
+      }
+      if (item.tipe === "pengeluaran") totalKeluar += Number(item.nominal);
+
+      let isPassFilter = true;
+      if (filter === "minggu") isPassFilter = ((now - itemDate) / (1000 * 3600 * 24)) <= 7;
+      else if (filter === "bulan") isPassFilter = itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
+      else if (filter === "tahun") isPassFilter = itemDate.getFullYear() === now.getFullYear();
+
+      if (isPassFilter) {
+        const isMasuk = item.tipe === "pemasukan";
+        const pembayarInfo = item.pembayarNama ? `<span style="font-size:10px; color:#2563eb; background:#eff6ff; padding:1px 6px; border-radius:4px; font-weight:bold;">Dari: ${item.pembayarNama}</span>` : '';
+        const btnHapusKas = isAdminOrMod ? `<button onclick="moveToTrashKas('${id}')" style="background:none; border:none; color:#ef4444; font-size:12px; cursor:pointer; margin-left:8px;" title="Hapus ke Sampah">🗑️️</button>` : '';
+
+        listContainer.innerHTML += `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f3f4f6; font-size:12px;">
+            <div>
+              <p style="font-weight:bold; color:#1f2937;">${item.keterangan}</p>
+              <div style="margin-top:2px;">${pembayarInfo} <span style="font-size:10px; color:#9ca3af;">• ${new Date(item.tanggal).toLocaleDateString("id-ID")}</span></div>
+            </div>
+            <div style="display:flex; align-items:center;">
+              <p style="font-weight:bold; color:${isMasuk ? '#16a34a' : '#dc2626'};">
+                ${isMasuk ? '+' : '-'} Rp ${Number(item.nominal).toLocaleString('id-ID')}
+              </p>
+              ${btnHapusKas}
+            </div>
+          </div>`;
+      }
+    });
+
+    document.getElementById("total-masuk").innerText = `Rp ${totalMasuk.toLocaleString('id-ID')}`;
+    document.getElementById("total-keluar").innerText = `Rp ${totalKeluar.toLocaleString('id-ID')}`;
+    document.getElementById("total-kas").innerText = `Rp ${(totalMasuk - totalKeluar).toLocaleString('id-ID')}`;
+
+    if (rekapContainer) {
+      rekapContainer.innerHTML = "";
+      const keys = Object.keys(rekapPemudaMap);
+      if (keys.length === 0) {
+        rekapContainer.innerHTML = `<p style="font-size: 11px; color: #9ca3af; text-align: center;">Belum ada iuran masuk 30 hari terakhir.</p>`;
+      } else {
+        keys.forEach(nama => {
+          rekapContainer.innerHTML += `
+            <div class="rekap-item">
+              <span style="font-weight:bold; color:#334155;">👤 ${nama}</span>
+              <span style="font-weight:bold; color:#16a34a;">Rp ${rekapPemudaMap[nama].toLocaleString('id-ID')}</span>
+            </div>`;
+        });
+      }
+    }
+  });
+}
+
+// MEMINDAHKAN TRANSAKSI KE BERKAS SAMPAH (TIDAK LANGSUNG DIHAPUS PERMANEN)
+window.moveToTrashKas = async (kasId) => {
+  if (confirm("Pindahkan transaksi ini ke Berkas Sampah?")) {
+    try {
+      const doc = await db.collection("kas").doc(kasId).get();
+      if (doc.exists) {
+        const data = doc.data();
+        await db.collection("sampah_kas").add({
+          ...data,
+          deletedBy: currentUserData.nama,
+          deletedAt: new Date().toISOString()
+        });
+        await db.collection("kas").doc(kasId).delete();
+        alert("Transaksi dipindahkan ke Berkas Sampah.");
+      }
+    } catch (err) { alert("Gagal memindahkan: " + err.message); }
+  }
+};
+
+// LOG BERKAS SAMPAH (KHUSUS ADMIN)
+function listenSampahKas() {
+  db.collection("sampah_kas").orderBy("deletedAt", "desc").onSnapshot((snapshot) => {
+    const container = document.getElementById("list-sampah");
+    if (!container) return;
+    container.innerHTML = "";
+
+    if (snapshot.empty) {
+      container.innerHTML = `<p style="font-size: 11px; color: #9ca3af; text-align: center;">Tidak ada berkas sampah saat ini.</p>`;
+      return;
+    }
+
+    snapshot.forEach((docSnap) => {
+      const item = docSnap.data();
+      const id = docSnap.id;
+
+      container.innerHTML += `
+        <div style="padding: 8px; background: white; border: 1px solid #fca5a5; border-radius: 8px; margin-bottom: 6px; font-size: 11px;">
+          <div style="display:flex; justify-content:space-between; font-weight:bold;">
+            <span>${item.keterangan} (Rp ${Number(item.nominal).toLocaleString('id-ID')})</span>
+            <span style="color:#dc2626;">Dihapus oleh: ${item.deletedBy}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:6px; align-items:center;">
+            <span style="font-size:9px; color:#6b7280;">${new Date(item.deletedAt).toLocaleDateString("id-ID")}</span>
+            <div>
+              <button onclick="restoreKas('${id}')" style="background:#2563eb; color:white; border:none; padding:2px 6px; border-radius:4px; font-size:10px; cursor:pointer;">↩️ Pulihkan</button>
+              <button onclick="deletePermanenKas('${id}')" style="background:#ef4444; color:white; border:none; padding:2px 6px; border-radius:4px; font-size:10px; cursor:pointer; margin-left:4px;">❌ Permanen</button>
+            </div>
+          </div>
+        </div>`;
+    });
+  });
+}
+
+// PULIHKAN DATA KAS (KHUSUS ADMIN)
+window.restoreKas = async (sampahId) => {
+  if (confirm("Pulihkan transaksi ini kembali ke Kas Utama?")) {
+    const doc = await db.collection("sampah_kas").doc(sampahId).get();
+    if (doc.exists) {
+      const data = doc.data();
+      delete data.deletedBy;
+      delete data.deletedAt;
+      await db.collection("kas").add(data);
+      await db.collection("sampah_kas").doc(sampahId).delete();
+      alert("Transaksi berhasil dipulihkan!");
+    }
+  }
+};
+
+// HAPUS PERMANEN (KHUSUS ADMIN)
+window.deletePermanenKas = async (sampahId) => {
+  if (confirm("HAPUS PERMANEN? Data ini tidak bisa dikembalikan lagi!")) {
+    await db.collection("sampah_kas").doc(sampahId).delete();
+    alert("Data berhasil dihapus permanen.");
+  }
+};
+
+// LOGIKA MULTI REKENING & QRIS
+function listenMultiRekening() {
+  db.collection("rekening").orderBy("created_at", "asc").onSnapshot((snapshot) => {
+    const container = document.getElementById("list-rekening");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const isAdminOrMod = currentUserData && (currentUserData.role === "admin" || currentUserData.role === "moderator");
+
+    if (snapshot.empty) {
+      container.innerHTML = `<p style="font-size: 12px; color: #9ca3af; text-align: center;">Belum ada metode pembayaran tersimpan.</p>`;
+      return;
+    }
+
+    snapshot.forEach((docSnap) => {
+      const item = docSnap.data();
+      const id = docSnap.id;
+
+      const btnHapus = isAdminOrMod ? `<button onclick="deleteRekening('${id}')" style="background:#ef4444; color:white; border:none; padding:4px 8px; border-radius:6px; font-size:10px; font-weight:bold; cursor:pointer;">🗑️ Hapus</button>` : '';
+
+      let qrisHtml = item.qris_url ? `
+        <div style="text-align:center; margin-top:8px;">
+          <img src="${item.qris_url}" style="width:140px; height:140px; border-radius:8px; border:1px solid #e5e7eb; object-fit:cover;">
+          <div><a href="${item.qris_url}" download="QRIS_${item.bank}.png" style="font-size:11px; color:#2563eb; font-weight:bold;">📥 Download QRIS</a></div>
+        </div>` : '';
+
+      container.innerHTML += `
+        <div class="bank-card">
+          <div style="width:100%;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <p style="font-weight:bold; font-size:13px; color:#1f2937;">🏦 ${item.bank}</p>
+              ${btnHapus}
+            </div>
+            <p style="font-size:12px; color:#4b5563; margin-top:2px;">No. Rek: <b>${item.rekening}</b> a.n <b>${item.pemilik || '-'}</b></p>
+            ${qrisHtml}
+          </div>
+        </div>`;
+    });
+  });
+}
+
+window.deleteRekening = async (rekId) => {
+  if (confirm("Hapus rekening/QRIS ini?")) {
+    await db.collection("rekening").doc(rekId).delete();
+    alert("Berhasil dihapus!");
+  }
+};
+
+// LOGIKA BERITA ACARA
+function listenBeritaAcara() {
+  db.collection("acara").orderBy("created_at", "desc").onSnapshot((snapshot) => {
+    const container = document.getElementById("list-acara");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const isAdminOrMod = currentUserData && (currentUserData.role === "admin" || currentUserData.role === "moderator");
+
+    snapshot.forEach((docSnap) => {
+      const acara = docSnap.data();
+      const id = docSnap.id;
+      const absensi = acara.absensi || {};
+      
+      const statusUser = absensi[currentUser.uid] ? absensi[currentUser.uid].status : "Belum Absen";
+      let listAbsenHtml = Object.values(absensi).map(a => `<span style="background:#f3f4f6; font-size:10px; padding:2px 6px; border-radius:4px; margin-right:4px;">${a.nama}: <b>${a.status}</b></span>`).join(" ");
+
+      const btnHapusHtml = isAdminOrMod ? `<button onclick="deleteAcara('${id}')" style="background:#ef4444; color:white; border:none; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:bold; cursor:pointer;">🗑 Hapus</button>` : '';
+
+      container.innerHTML += `
+        <div style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px; background:#fafafa;">
+          <div style="display:flex; justify-content:space-between; align-items:start;">
+            <div>
+              <h4 style="font-weight:bold; font-size:14px; color:#1e3a8a;">${acara.judul}</h4>
+              <span style="font-size:10px; background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:10px; font-weight:bold; display:inline-block; margin-top:2px;">${acara.tanggal}</span>
+            </div>
+            ${btnHapusHtml}
+          </div>
+          <p style="font-size:12px; color:#4b5563; margin:6px 0 4px 0;">${acara.deskripsi}</p>
+          <p style="font-size:10px; color:#9ca3af;">📍 Lokasi: ${acara.lokasi}</p>
+
+          <div style="padding-top:8px; border-top:1px solid #e5e7eb; margin-top:8px;">
+            <p style="font-size:10px; font-weight:bold; color:#6b7280; margin-bottom:6px;">Status Kamu: <span style="color:#2563eb;">${statusUser}</span></p>
+            <div style="display:flex; gap:8px;">
+              <button onclick="submitAbsen('${id}', 'Hadir')" style="flex:1; background:#16a34a; color:white; border:none; padding:6px; border-radius:6px; font-weight:bold; font-size:11px; cursor:pointer;">Hadir</button>
+              <button onclick="submitAbsen('${id}', 'Tidak Hadir')" style="flex:1; background:#ef4444; color:white; border:none; padding:6px; border-radius:6px; font-weight:bold; font-size:11px; cursor:pointer;">Tidak Hadir</button>
+            </div>
+          </div>
+
+          <div style="padding-top:8px; margin-top:6px;">
+            <p style="font-size:10px; color:#9ca3af; margin-bottom:4px;">Rekap Absensi:</p>
+            <div>${listAbsenHtml || '<span style="font-size:10px; color:#9ca3af;">Belum ada data</span>'}</div>
+          </div>
+        </div>`;
+    });
+  });
+}
+
+window.deleteAcara = async (acaraId) => {
+  if (confirm("Hapus acara ini?")) {
+    await db.collection("acara").doc(acaraId).delete();
+    alert("Acara dihapus!");
+  }
+};
+
+window.submitAbsen = async (acaraId, status) => {
+  await db.collection("acara").doc(acaraId).update({
+    [`absensi.${currentUser.uid}`]: { nama: currentUserData.nama, status: status }
+  });
+  alert(`Absensi disimpan: ${status}`);
+};
+
+// MODAL CONTROLLER
+const modalContainer = document.getElementById("modal-container");
+const modalTitle = document.getElementById("modal-title");
+const modalFields = document.getElementById("modal-fields");
+const modalForm = document.getElementById("modal-form");
+const modalShareWA = document.getElementById("modal-share-wa");
+const btnTriggerWA = document.getElementById("btn-trigger-wa");
+let activeModalType = "";
+
+if (document.getElementById("btn-close-modal")) {
+  document.getElementById("btn-close-modal").onclick = () => modalContainer.classList.add("hidden");
+}
+
+if (document.getElementById("btn-admin-kas")) {
+  document.getElementById("btn-admin-kas").onclick = () => {
+    activeModalType = "kas";
+    modalTitle.innerText = "Catat Transaksi Kas";
+    modalShareWA.classList.add("hidden");
+
+    let optionsUser = `<option value="">-- Bukan Iuran Pemuda / Kas Umum --</option>`;
+    Object.values(allUsersMap).forEach(nama => {
+      optionsUser += `<option value="${nama}">${nama}</option>`;
+    });
+
+    modalFields.innerHTML = `
+      <div class="form-group"><label>Jenis Transaksi</label><select id="m-tipe" class="form-control"><option value="pemasukan">Pemasukan (+)</option><option value="pengeluaran">Pengeluaran (-)</option></select></div>
+      <div class="form-group"><label>Nama Pembayar / Pemuda (Khusus Pemasukan)</label><select id="m-pembayar" class="form-control">${optionsUser}</select></div>
+      <div class="form-group"><label>Nominal (Rp)</label><input type="number" id="m-nominal" required class="form-control"></div>
+      <div class="form-group"><label>Keterangan Transaksi</label><input type="text" id="m-keterangan" required placeholder="Contoh: Uang Iuran Mingguan" class="form-control"></div>`;
+    modalContainer.classList.remove("hidden");
+  };
+}
+
+if (document.getElementById("btn-admin-acara")) {
+  document.getElementById("btn-admin-acara").onclick = () => {
+    activeModalType = "acara";
+    modalTitle.innerText = "Buat Berita Acara Baru";
+    modalShareWA.classList.add("hidden");
+    modalFields.innerHTML = `
+      <div class="form-group"><label>Judul Acara</label><input type="text" id="m-judul" required class="form-control"></div>
+      <div class="form-group"><label>Tanggal & Waktu</label><input type="text" id="m-tgl" placeholder="Minggu, 25 Okt 09.00 WIB" required class="form-control"></div>
+      <div class="form-group"><label>Lokasi</label><input type="text" id="m-lokasi" required class="form-control"></div>
+      <div class="form-group"><label>Deskripsi</label><textarea id="m-deskripsi" class="form-control"></textarea></div>`;
+    modalContainer.classList.remove("hidden");
+  };
+}
+
+if (document.getElementById("btn-admin-qris")) {
+  document.getElementById("btn-admin-qris").onclick = () => {
+    activeModalType = "qris";
+    modalTitle.innerText = "Tambah Rekening / E-Wallet";
+    modalShareWA.classList.add("hidden");
+    modalFields.innerHTML = `
+      <div class="form-group"><label>Nama Bank / E-Wallet</label><input type="text" id="m-bank" placeholder="Contoh: BCA / DANA / QRIS" required class="form-control"></div>
+      <div class="form-group"><label>Nomor Rekening / HP</label><input type="text" id="m-rek" required class="form-control"></div>
+      <div class="form-group"><label>Atas Nama (Pemilik)</label><input type="text" id="m-pemilik" placeholder="Contoh: Bendahara Pemuda" class="form-control"></div>
+      <div class="form-group"><label>URL Gambar QRIS (Opsional)</label><input type="text" id="m-qris-url" class="form-control"></div>`;
+    modalContainer.classList.remove("hidden");
+  };
+}
+
+if (modalForm) {
+  modalForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (activeModalType === "kas") {
+      const tipe = document.getElementById("m-tipe").value;
+      const pembayarNama = document.getElementById("m-pembayar").value || "";
+      const nominal = Number(document.getElementById("m-nominal").value);
+      const keterangan = document.getElementById("m-keterangan").value;
+
+      await db.collection("kas").add({
+        tipe: tipe,
+        pembayarNama: pembayarNama,
+        nominal: nominal,
+        keterangan: keterangan,
+        tanggal: new Date().toISOString()
+      });
+
+      modalContainer.classList.add("hidden");
+
+      if (tipe === "pemasukan") {
+        const namaTarget = pembayarNama ? pembayarNama : "Kawan";
+        const pesanApresiasi = `Makasih ya ${namaTarget} sudah bayar 😁\nSemoga rezekinya lancar terus 😇`;
+
+        alert(`🎉 TRANSAKSI BERHASIL!\n\n"${pesanApresiasi}"`);
+
+        if (confirm("Ingin kirim pesan ucapan terima kasih ini ke WhatsApp?")) {
+          window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesanApresiasi)}`, '_blank');
+        }
+      } else {
+        alert("Pengeluaran kas berhasil dicatat!");
+      }
+
+    } else if (activeModalType === "acara") {
+      const judul = document.getElementById("m-judul").value;
+      const tgl = document.getElementById("m-tgl").value;
+      const lokasi = document.getElementById("m-lokasi").value;
+      const deskripsi = document.getElementById("m-deskripsi").value;
+
+      await db.collection("acara").add({
+        judul: judul, tanggal: tgl, lokasi: lokasi, deskripsi: deskripsi,
+        created_at: new Date().toISOString(), absensi: {}
+      });
+
+      modalShareWA.classList.remove("hidden");
+      const pesanWA = `📢 *BERITA ACARA PEMUDA*\n\n📌 *Acara:* ${judul}\n📅 *Waktu:* ${tgl}\n📍 *Lokasi:* ${lokasi}\n📝 *Detail:* ${deskripsi}\n\nMohon konfirmasi absensi via aplikasi!`;
+      btnTriggerWA.onclick = () => window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesanWA)}`, '_blank');
+    } else if (activeModalType === "qris") {
+      await db.collection("rekening").add({
+        bank: document.getElementById("m-bank").value,
+        rekening: document.getElementById("m-rek").value,
+        pemilik: document.getElementById("m-pemilik").value,
+        qris_url: document.getElementById("m-qris-url").value,
+        created_at: new Date().toISOString()
+      });
+      modalContainer.classList.add("hidden");
+    }
+  });
+}

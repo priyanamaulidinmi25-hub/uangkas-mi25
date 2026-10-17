@@ -1,0 +1,20 @@
+{
+  "short_name": "Kas MI25",
+  "name": "Aplikasi Kas Kelas MI25",
+  "icons": [
+    {
+      "src": "https://i.ibb.co/jvq5FML2/Proyek-Baru-5-165621-F.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://i.ibb.co/jvq5FML2/Proyek-Baru-5-165621-F.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#2563eb",
+  "theme_color": "#2563eb",
+  "display": "standalone"
+}
