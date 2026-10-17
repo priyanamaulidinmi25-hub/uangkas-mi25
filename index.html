@@ -18,11 +18,14 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
 
+  <!-- Chart.js untuk Grafik Visual -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
-    body { background-color: #f3f4f6; color: #1f2937; padding-bottom: 40px; }
+    body { background-color: #f3f4f6; color: #1f2937; padding-bottom: 75px; }
     
-    header { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; padding: 16px; position: sticky; top: 0; z-index: 50; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    header { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; padding: 14px 16px; position: sticky; top: 0; z-index: 50; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
     .header-content { max-width: 450px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
     .badge { background: #1e40af; font-size: 11px; padding: 2px 8px; border-radius: 20px; text-transform: capitalize; border: 1px solid rgba(255,255,255,0.2); }
     .btn-logout { background: #ef4444; color: white; border: none; padding: 6px 12px; font-size: 12px; font-weight: bold; border-radius: 8px; cursor: pointer; }
@@ -32,6 +35,13 @@
     .card { background: white; border-radius: 16px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.04); border: 1px solid #e5e7eb; }
     .card-title { font-size: 15px; font-weight: bold; color: #111827; }
     .flex-between { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+
+    /* BANNER CAROUSEL SLIDER */
+    .banner-container { position: relative; width: 100%; border-radius: 14px; overflow: hidden; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); background: #e5e7eb; height: 150px; }
+    .banner-slider { display: flex; transition: transform 0.5s ease-in-out; height: 100%; }
+    .banner-slide { min-width: 100%; height: 100%; position: relative; }
+    .banner-slide img { width: 100%; height: 100%; object-fit: cover; }
+    .banner-caption { position: absolute; bottom: 0; inset-x: 0; background: linear-gradient(transparent, rgba(0,0,0,0.7)); color: white; padding: 8px 12px; font-size: 11px; font-weight: 500; }
 
     .card-saldo { background: linear-gradient(135deg, #2563eb, #3730a3); color: white; border: none; }
     .saldo-total { font-size: 32px; font-weight: 800; margin: 4px 0 16px 0; }
@@ -51,11 +61,21 @@
     .btn-danger { background: #ef4444; color: white; border: none; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
     .btn-link { color: #2563eb; font-weight: bold; background: none; border: none; cursor: pointer; text-decoration: underline; }
 
+    /* BOTTOM NAVIGATION BAR */
+    .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #ffffff; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-around; padding: 8px 0; z-index: 100; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
+    .nav-item { border: none; background: none; display: flex; flex-direction: column; align-items: center; font-size: 10px; font-weight: 600; color: #6b7280; cursor: pointer; flex: 1; }
+    .nav-item.active { color: #2563eb; }
+    .nav-icon { font-size: 18px; margin-bottom: 2px; }
+
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 100; }
     .modal-box { background: white; border-radius: 16px; padding: 20px; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto; }
     .btn-wa { background: #22c55e; color: white; border: none; padding: 10px; width: 100%; border-radius: 10px; font-weight: bold; cursor: pointer; margin-top: 12px; }
 
     .verify-item { background: #fffbe3; border: 1px solid #fde047; padding: 12px; border-radius: 12px; margin-bottom: 8px; }
+    .status-badge { font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 12px; }
+    .status-lunas { background: #dcfce7; color: #15803d; }
+    .status-nunggak { background: #fee2e2; color: #b91c1c; }
+
     .hidden { display: none !important; }
   </style>
 </head>
@@ -103,114 +123,183 @@
       </p>
     </section>
 
-    <!-- DASHBOARD UTAMA -->
+    <!-- DASHBOARD UTAMA BERBASIS TAB NAVIGASI -->
     <div id="main-dashboard" class="hidden">
 
-      <!-- SALDO KAS -->
-      <section class="card card-saldo">
-        <p style="font-size: 12px; opacity: 0.9;">Total Saldo Kas Kelas MI25</p>
-        <h3 id="total-kas" class="saldo-total">Rp 0</h3>
-        <div class="saldo-grid">
-          <div>
-            <p style="opacity: 0.8;">Total Pemasukan</p>
-            <p id="total-masuk" class="val-masuk">Rp 0</p>
-          </div>
-          <div>
-            <p style="opacity: 0.8;">Total Pengeluaran</p>
-            <p id="total-keluar" class="val-keluar">Rp 0</p>
+      <!-- BANNER SLIDER BERGESER OTOMATIS -->
+      <div class="banner-container">
+        <div id="banner-slider" class="banner-slider">
+          <div class="banner-slide">
+            <img src="https://i.ibb.co/jvq5FML2/Proyek-Baru-5-165621-F.png" alt="Banner Default">
+            <div class="banner-caption">Selamat Datang di Aplikasi Kas MI25 🚀</div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <!-- TOMBOL BAYAR KAS UNTUK MAHASISWA -->
-      <section class="card" style="background: #eff6ff; border: 1px solid #bfdbfe;">
-        <div class="flex-between" style="margin-bottom: 6px;">
-          <div>
-            <h3 class="card-title" style="color: #1e40af;">💸 Bayar Kas Online</h3>
-            <p style="font-size: 11px; color: #3b82f6;">Transfer via QRIS DANA / Bank & Upload Bukti</p>
+      <!-- TAB 1: BERANDA -->
+      <div id="tab-beranda" class="tab-content">
+        <!-- SALDO KAS -->
+        <section class="card card-saldo">
+          <p style="font-size: 12px; opacity: 0.9;">Total Saldo Kas Kelas MI25</p>
+          <h3 id="total-kas" class="saldo-total">Rp 0</h3>
+          <div class="saldo-grid">
+            <div>
+              <p style="opacity: 0.8;">Total Pemasukan</p>
+              <p id="total-masuk" class="val-masuk">Rp 0</p>
+            </div>
+            <div>
+              <p style="opacity: 0.8;">Total Pengeluaran</p>
+              <p id="total-keluar" class="val-keluar">Rp 0</p>
+            </div>
           </div>
-          <button id="btn-bayar-online" class="btn-primary" style="width: auto; padding: 8px 14px; margin:0;">Upload Bukti</button>
-        </div>
-      </section>
+        </section>
 
-      <!-- VERIFIKASI SETORAN (KHUSUS BENDAHARA/ADMIN) -->
-      <section id="section-verifikasi" class="card hidden" style="border: 1px dashed #eab308; background: #fefce8;">
-        <h3 class="card-title" style="color: #a16207; margin-bottom: 4px;">📥 Setoran Menunggu Verifikasi</h3>
-        <p style="font-size: 11px; color: #854d0e; margin-bottom: 12px;">Periksa bukti transfer mahasiswa sebelum menambah saldo kas.</p>
-        <div id="list-verifikasi">
-          <p style="font-size: 12px; color: #9ca3af; text-align: center;">Tidak ada setoran baru.</p>
-        </div>
-      </section>
+        <!-- TOMBOL BAYAR KAS ONLINE -->
+        <section class="card" style="background: #eff6ff; border: 1px solid #bfdbfe;">
+          <div class="flex-between" style="margin-bottom: 0;">
+            <div>
+              <h3 class="card-title" style="color: #1e40af;">💸 Bayar Kas Online</h3>
+              <p style="font-size: 11px; color: #3b82f6;">Transfer via QRIS DANA & Upload Bukti</p>
+            </div>
+            <button id="btn-bayar-online" class="btn-primary" style="width: auto; padding: 8px 14px; margin:0;">Upload Bukti</button>
+          </div>
+        </section>
 
-      <!-- MULTI REKENING & QRIS KELAS -->
-      <section class="card">
-        <div class="flex-between">
-          <h3 class="card-title">💳 Rekening Transfer & QRIS Bendahara</h3>
-          <button id="btn-admin-qris" class="btn-secondary hidden">+ Tambah Rekening</button>
-        </div>
-        <div id="list-rekening">
-          <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat rekening...</p>
-        </div>
-      </section>
+        <!-- VERIFIKASI SETORAN (ADMIN) -->
+        <section id="section-verifikasi" class="card hidden" style="border: 1px dashed #eab308; background: #fefce8;">
+          <h3 class="card-title" style="color: #a16207; margin-bottom: 4px;">📥 Setoran Menunggu Verifikasi</h3>
+          <div id="list-verifikasi">
+            <p style="font-size: 12px; color: #9ca3af; text-align: center;">Tidak ada setoran baru.</p>
+          </div>
+        </section>
 
-      <!-- TRANSAKSI UANG KAS -->
-      <section class="card">
-        <div class="flex-between">
-          <h3 class="card-title">📊 Riwayat Transaksi Kas Kelas</h3>
-          <button id="btn-admin-kas" class="btn-secondary hidden">+ Transaksi Manual</button>
-        </div>
+        <!-- REKENING & QRIS -->
+        <section class="card">
+          <div class="flex-between">
+            <h3 class="card-title">💳 Rekening Transfer & QRIS</h3>
+            <button id="btn-admin-qris" class="btn-secondary hidden">+ Tambah Rekening</button>
+          </div>
+          <div id="list-rekening">
+            <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat rekening...</p>
+          </div>
+        </section>
 
-        <select id="filter-periode" class="form-control" style="margin-bottom: 12px; font-size: 12px; background-color: #f9fafb;">
-          <option value="semua">Semua Transaksi</option>
-          <option value="minggu">1 Minggu Terakhir</option>
-          <option value="bulan">Bulan Ini</option>
-          <option value="tahun">Tahun Ini</option>
-        </select>
+        <!-- RIWAYAT TRANSAKSI TERAKHIR -->
+        <section class="card">
+          <div class="flex-between">
+            <h3 class="card-title">📊 Riwayat Transaksi Kas</h3>
+            <button id="btn-admin-kas" class="btn-secondary hidden">+ Transaksi Manual</button>
+          </div>
+          <select id="filter-periode" class="form-control" style="margin-bottom: 12px; font-size: 12px; background-color: #f9fafb;">
+            <option value="semua">Semua Transaksi</option>
+            <option value="minggu">1 Minggu Terakhir</option>
+            <option value="bulan">Bulan Ini</option>
+            <option value="tahun">Tahun Ini</option>
+          </select>
+          <div id="list-transaksi">
+            <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat data transaksi...</p>
+          </div>
+        </section>
+      </div>
 
-        <div id="list-transaksi">
-          <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat data transaksi...</p>
-        </div>
-      </section>
+      <!-- TAB 2: REKAP & GRAFIK VISUAL -->
+      <div id="tab-rekap" class="tab-content hidden">
+        <!-- CHART VISUAL FINANSIAL -->
+        <section class="card">
+          <h3 class="card-title" style="margin-bottom: 12px;">📈 Statistik Keuangan Kelas</h3>
+          <canvas id="chart-keuangan" style="width: 100%; height: 200px;"></canvas>
+        </section>
 
-      <!-- BERKAS SAMPAH TRANSAKSI (KHUSUS ADMIN) -->
-      <section id="section-sampah" class="card hidden" style="border: 1px dashed #ef4444; background: #fef2f2;">
-        <h3 class="card-title" style="color: #dc2626; margin-bottom: 4px;">🗑️ Berkas Sampah (Khusus Admin)</h3>
-        <p style="font-size: 11px; color: #991b1b; margin-bottom: 12px;">Transaksi kas yang dihapus tersimpan di sini.</p>
-        <div id="list-sampah">
-          <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat berkas sampah...</p>
-        </div>
-      </section>
+        <!-- STATUS IURAN MAHASISWA -->
+        <section class="card">
+          <h3 class="card-title" style="margin-bottom: 4px;">🎯 Status Iuran Kas Mahasiswa</h3>
+          <p style="font-size: 11px; color: #6b7280; margin-bottom: 12px;">Monitoring keaktifan iuran kas tiap mahasiswa (30 Hari Terakhir).</p>
+          <div id="list-rekap-30hari">
+            <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat data status iuran...</p>
+          </div>
+        </section>
+      </div>
 
-      <!-- REKAPITULASI IURAN MAHASISWA 30 HARI TERAKHIR -->
-      <section class="card">
-        <h3 class="card-title" style="margin-bottom: 4px;">📈 Rekap Kas Mahasiswa (30 Hari Terakhir)</h3>
-        <p style="font-size: 11px; color: #6b7280; margin-bottom: 12px;">Total iuran kas kelas yang sudah dibayarkan tiap mahasiswa.</p>
-        <div id="list-rekap-30hari">
-          <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat rekapitulasi...</p>
-        </div>
-      </section>
+      <!-- TAB 3: DAFTAR ANGGOTA -->
+      <div id="tab-anggota" class="tab-content hidden">
+        <section class="card">
+          <div class="flex-between" style="margin-bottom: 8px;">
+            <h3 class="card-title">🎓 Mahasiswa MI25 Terdaftar</h3>
+            <span id="total-anggota-count" style="font-size: 11px; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 12px; font-weight: bold;">0 Orang</span>
+          </div>
+          <div id="list-anggota">
+            <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat daftar mahasiswa...</p>
+          </div>
+        </section>
+      </div>
 
-      <!-- DAFTAR MAHASISWA MI25 -->
-      <section class="card">
-        <div class="flex-between" style="margin-bottom: 8px;">
-          <h3 class="card-title">🎓 Mahasiswa MI25 Terdaftar</h3>
-          <span id="total-anggota-count" style="font-size: 11px; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 12px; font-weight: bold;">0 Mahasiswa</span>
-        </div>
-        <div id="list-anggota">
-          <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat daftar mahasiswa...</p>
-        </div>
-      </section>
+      <!-- TAB 4: LAINNYA, AGENDA & REPORT BUG -->
+      <div id="tab-lainnya" class="tab-content hidden">
+        <!-- BANNER MANAGEMENT (ADMIN ONLY) -->
+        <section id="section-admin-banner" class="card hidden">
+          <div class="flex-between">
+            <h3 class="card-title">🖼️ Kelola Banner Promo/Info</h3>
+            <button id="btn-admin-banner" class="btn-secondary">+ Tambah Banner</button>
+          </div>
+        </section>
 
-      <!-- BERITA ACARA & KEGIATAN KELAS -->
-      <section class="card">
-        <div class="flex-between">
-          <h3 class="card-title">📢 Agenda & Informasi Kelas</h3>
-          <button id="btn-admin-acara" class="btn-secondary hidden">+ Buat Agenda</button>
-        </div>
-        <div id="list-acara">
-          <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat agenda kelas...</p>
-        </div>
-      </section>
+        <!-- AGENDA KELAS -->
+        <section class="card">
+          <div class="flex-between">
+            <h3 class="card-title">📢 Agenda & Informasi Kelas</h3>
+            <button id="btn-admin-acara" class="btn-secondary hidden">+ Buat Agenda</button>
+          </div>
+          <div id="list-acara">
+            <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat agenda kelas...</p>
+          </div>
+        </section>
+
+        <!-- REPORT BUG & SARAN -->
+        <section class="card" style="border: 1px solid #fed7aa; background: #fff7ed;">
+          <h3 class="card-title" style="color: #c2410c; margin-bottom: 4px;">🐛 Laporkan Bug / Saran App</h3>
+          <p style="font-size: 11px; color: #9a3412; margin-bottom: 12px;">Temukan kendala atau punya ide? Laporkan langsung ke pengembang.</p>
+          <form id="form-report-bug">
+            <textarea id="bug-pesan" class="form-control" rows="3" placeholder="Tuliskan kendala atau saran kamu di sini..." required style="margin-bottom: 8px;"></textarea>
+            <button type="submit" class="btn-primary" style="background: #ea580c;">Kirim Laporan Bug</button>
+          </form>
+        </section>
+
+        <!-- LAPORAN BUG DITERIMA (KHUSUS ADMIN) -->
+        <section id="section-admin-bugs" class="card hidden" style="border: 1px dashed #ea580c; background: #fff7ed;">
+          <h3 class="card-title" style="color: #c2410c; margin-bottom: 8px;">📥 Daftar Laporan Bug Masuk</h3>
+          <div id="list-bugs-admin">
+            <p style="font-size: 11px; color: #9ca3af; text-align: center;">Tidak ada laporan bug baru.</p>
+          </div>
+        </section>
+
+        <!-- BERKAS SAMPAH (ADMIN) -->
+        <section id="section-sampah" class="card hidden" style="border: 1px dashed #ef4444; background: #fef2f2;">
+          <h3 class="card-title" style="color: #dc2626; margin-bottom: 4px;">🗑️ Berkas Sampah (Admin)</h3>
+          <div id="list-sampah">
+            <p style="font-size: 12px; color: #9ca3af; text-align: center;">Memuat berkas sampah...</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- BOTTOM NAVIGATION BAR -->
+      <nav class="bottom-nav">
+        <button class="nav-item active" data-tab="tab-beranda">
+          <span class="nav-icon">🏠</span>
+          <span>Beranda</span>
+        </button>
+        <button class="nav-item" data-tab="tab-rekap">
+          <span class="nav-icon">📊</span>
+          <span>Rekap</span>
+        </button>
+        <button class="nav-item" data-tab="tab-anggota">
+          <span class="nav-icon">🎓</span>
+          <span>Anggota</span>
+        </button>
+        <button class="nav-item" data-tab="tab-lainnya">
+          <span class="nav-icon">⚙️</span>
+          <span>Lainnya</span>
+        </button>
+      </nav>
 
     </div>
   </main>
@@ -236,7 +325,7 @@
 
   <script src="app.js"></script>
 
-  <!-- REGISTRASI SERVICE WORKER UNTUK BISA DI-INSTALL SEBAGAI PWA -->
+  <!-- REGISTRASI SERVICE WORKER -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

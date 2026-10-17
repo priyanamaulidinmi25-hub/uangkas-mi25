@@ -17,6 +17,8 @@ let currentUser = null;
 let currentUserData = null;
 let isRegisterState = false;
 let allUsersMap = {};
+let bannerInterval = null;
+let chartKeuanganInstance = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   const authSection = document.getElementById("auth-section");
@@ -27,6 +29,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnToggleAuth = document.getElementById("btn-toggle-auth");
   const btnLogout = document.getElementById("btn-logout");
   const userRoleBadge = document.getElementById("user-role-badge");
+
+  initTabNavigation();
 
   if (btnToggleAuth) {
     btnToggleAuth.addEventListener("click", (e) => {
@@ -93,12 +97,18 @@ document.addEventListener("DOMContentLoaded", () => {
       listenBeritaAcara();
       listenMultiRekening();
       listenSetoranPending();
+      listenBanners();
 
       if (currentUserData.role === "admin") {
         document.getElementById("section-sampah")?.classList.remove("hidden");
+        document.getElementById("section-admin-banner")?.classList.remove("hidden");
+        document.getElementById("section-admin-bugs")?.classList.remove("hidden");
         listenSampahKas();
+        listenReportBugsAdmin();
       } else {
         document.getElementById("section-sampah")?.classList.add("hidden");
+        document.getElementById("section-admin-banner")?.classList.add("hidden");
+        document.getElementById("section-admin-bugs")?.classList.add("hidden");
       }
     } else {
       currentUser = null;
@@ -111,6 +121,24 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
+// SYSTEM TAB NAVIGATION
+function initTabNavigation() {
+  const navButtons = document.querySelectorAll('.nav-item');
+  const tabContents = document.querySelectorAll('.tab-content');
+
+  navButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetTab = btn.getAttribute('data-tab');
+
+      navButtons.forEach(b => b.classList.remove('active'));
+      tabContents.forEach(c => c.classList.add('hidden'));
+
+      btn.classList.add('active');
+      document.getElementById(targetTab)?.classList.remove('hidden');
+    });
+  });
+}
+
 function applyRolePermissions(role) {
   const isAdminOrMod = role === "admin" || role === "moderator";
   const btnKas = document.getElementById("btn-admin-kas");
@@ -122,12 +150,58 @@ function applyRolePermissions(role) {
   if (btnQris) btnQris.classList.toggle("hidden", !isAdminOrMod);
 }
 
-// FETCH DAFTAR ANGGOTA & AKTIVITAS LOGIN
+// BANNER SLIDER DINAMIS
+function listenBanners() {
+  db.collection("banners").orderBy("created_at", "desc").onSnapshot((snapshot) => {
+    const slider = document.getElementById("banner-slider");
+    if (!slider) return;
+
+    if (bannerInterval) clearInterval(bannerInterval);
+
+    if (snapshot.empty) {
+      slider.innerHTML = `
+        <div class="banner-slide">
+          <img src="https://i.ibb.co/jvq5FML2/Proyek-Baru-5-165621-F.png" alt="Banner Default">
+          <div class="banner-caption">Selamat Datang di Aplikasi Kas MI25 🚀</div>
+        </div>`;
+      slider.style.transform = `translateX(0%)`;
+      return;
+    }
+
+    let html = "";
+    let count = 0;
+    snapshot.forEach(docSnap => {
+      count++;
+      const item = docSnap.data();
+      html += `
+        <div class="banner-slide">
+          <img src="${item.imageUrl}" alt="${item.caption}">
+          <div class="banner-caption">${item.caption}</div>
+        </div>`;
+    });
+    slider.innerHTML = html;
+
+    // Geser otomatis jika lebih dari 1 banner
+    if (count > 1) {
+      let currentIndex = 0;
+      bannerInterval = setInterval(() => {
+        currentIndex = (currentIndex + 1) % count;
+        slider.style.transform = `translateX(-${currentIndex * 100}%)`;
+      }, 3500);
+    } else {
+      slider.style.transform = `translateX(0%)`;
+    }
+  });
+}
+
+// FETCH DAFTAR ANGGOTA (DENGAN FIX BUG DUPLIKASI KODE)
 async function fetchUsersList() {
   db.collection("users").onSnapshot((snapshot) => {
     const container = document.getElementById("list-anggota");
     const countBadge = document.getElementById("total-anggota-count");
     if (!container) return;
+
+    // Mengosongkan container agar tidak terduplikasi saat data ter-update
     container.innerHTML = "";
     
     let totalCount = 0;
@@ -141,9 +215,9 @@ async function fetchUsersList() {
       const tglLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleDateString("id-ID", { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : "Baru saja";
 
       container.innerHTML += `
-        <div class="user-item">
+        <div class="user-item" style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f3f4f6;">
           <div>
-            <p style="font-weight:bold; color:#1f2937;">👤 ${user.nama}</p>
+            <p style="font-weight:bold; color:#1f2937; font-size:13px;">👤 ${user.nama}</p>
             <p style="font-size:10px; color:#9ca3af;">${user.email}</p>
           </div>
           <div style="text-align:right;">
@@ -157,7 +231,7 @@ async function fetchUsersList() {
   });
 }
 
-// LOGIKA TRANSAKSI KAS & REKAP 30 HARI
+// LOGIKA TRANSAKSI KAS, STATUS IURAN & CHART VISUAL
 function listenDataKas() {
   db.collection("kas").orderBy("tanggal", "desc").onSnapshot((snapshot) => {
     let totalMasuk = 0, totalKeluar = 0;
@@ -217,23 +291,134 @@ function listenDataKas() {
     document.getElementById("total-keluar").innerText = `Rp ${totalKeluar.toLocaleString('id-ID')}`;
     document.getElementById("total-kas").innerText = `Rp ${(totalMasuk - totalKeluar).toLocaleString('id-ID')}`;
 
+    // RENDER CHART VISUAL KEUANGAN
+    renderChartKeuangan(totalMasuk, totalKeluar);
+
+    // RENDER STATUS IURAN LUNAS / NUNGGAK PER MAHASISWA
     if (rekapContainer) {
       rekapContainer.innerHTML = "";
-      const keys = Object.keys(rekapPemudaMap);
-      if (keys.length === 0) {
-        rekapContainer.innerHTML = `<p style="font-size: 11px; color: #9ca3af; text-align: center;">Belum ada iuran masuk 30 hari terakhir.</p>`;
+      const allMembers = Object.values(allUsersMap);
+
+      if (allMembers.length === 0) {
+        rekapContainer.innerHTML = `<p style="font-size: 11px; color: #9ca3af; text-align: center;">Memuat rekapitulasi...</p>`;
       } else {
-        keys.forEach(nama => {
+        allMembers.forEach(nama => {
+          const totalBayar = rekapPemudaMap[nama] || 0;
+          const isLunas = totalBayar > 0;
+          const statusBadge = isLunas ? `<span class="status-badge status-lunas">Lunas 🟢</span>` : `<span class="status-badge status-nunggak">Nunggak 🔴</span>`;
+
+          const btnIngatkanWA = !isLunas ? `
+            <button onclick="kirimPengingatWA('${nama}')" style="background:#22c55e; color:white; border:none; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:bold; cursor:pointer; margin-left:6px;">💬 Tagih WA</button>
+          ` : '';
+
           rekapContainer.innerHTML += `
-            <div class="rekap-item">
-              <span style="font-weight:bold; color:#334155;">👤 ${nama}</span>
-              <span style="font-weight:bold; color:#16a34a;">Rp ${rekapPemudaMap[nama].toLocaleString('id-ID')}</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f3f4f6;">
+              <div>
+                <p style="font-weight:bold; color:#334155; font-size:12px;">👤 ${nama}</p>
+                <p style="font-size:11px; color:#16a34a; font-weight:bold; margin-top:2px;">Total: Rp ${totalBayar.toLocaleString('id-ID')}</p>
+              </div>
+              <div style="display:flex; align-items:center;">
+                ${statusBadge}
+                ${btnIngatkanWA}
+              </div>
             </div>`;
         });
       }
     }
   });
 }
+
+// FUNCTION CHART.JS FINANSIAL
+function renderChartKeuangan(masuk, keluar) {
+  const ctx = document.getElementById('chart-keuangan')?.getContext('2d');
+  if (!ctx) return;
+
+  if (chartKeuanganInstance) chartKeuanganInstance.destroy();
+
+  chartKeuanganInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Total Pemasukan', 'Total Pengeluaran'],
+      datasets: [{
+        data: [masuk, keluar],
+        backgroundColor: ['#22c55e', '#ef4444'],
+        borderWidth: 2,
+        borderColor: '#ffffff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+// FUCTION KIRIM PENGINGAT WA
+window.kirimPengingatWA = (nama) => {
+  const pesan = `Halo ${nama} 😄\nSekadar mengingatkan untuk iuran kas kelas MI25 ya. Kamu bisa langsung bayar online via QRIS DANA & Upload Bukti di aplikasi kas:\nhttps://uangkasmi25.netlify.app\n\nTerima kasih! 🙏`;
+  window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(pesan)}`, '_blank');
+};
+
+// REPORT BUG FORM SUBMIT
+document.getElementById('form-report-bug')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pesan = document.getElementById('bug-pesan').value;
+
+  try {
+    await db.collection("report_bugs").add({
+      namaPengirim: currentUserData?.nama || "Anonim",
+      emailPengirim: currentUserData?.email || "-",
+      pesan: pesan,
+      tanggal: new Date().toISOString()
+    });
+
+    alert("Laporan bug / saran berhasil terkirim! Terima kasih bantuanmu.");
+    document.getElementById('bug-pesan').value = "";
+  } catch (err) {
+    alert("Gagal mengirim laporan: " + err.message);
+  }
+});
+
+// LISTEN REPORT BUGS (KHUSUS ADMIN)
+function listenReportBugsAdmin() {
+  db.collection("report_bugs").orderBy("tanggal", "desc").onSnapshot((snapshot) => {
+    const container = document.getElementById("list-bugs-admin");
+    if (!container) return;
+    container.innerHTML = "";
+
+    if (snapshot.empty) {
+      container.innerHTML = `<p style="font-size: 11px; color: #9ca3af; text-align: center;">Tidak ada laporan bug baru.</p>`;
+      return;
+    }
+
+    snapshot.forEach((docSnap) => {
+      const item = docSnap.data();
+      const id = docSnap.id;
+
+      container.innerHTML += `
+        <div style="padding: 10px; background: white; border: 1px solid #fed7aa; border-radius: 8px; margin-bottom: 6px; font-size: 11px;">
+          <div style="display:flex; justify-content:space-between; font-weight:bold; color:#c2410c;">
+            <span>👤 ${item.namaPengirim}</span>
+            <span style="font-size:9px; color:#9ca3af;">${new Date(item.tanggal).toLocaleDateString("id-ID")}</span>
+          </div>
+          <p style="font-size:12px; color:#374151; margin:6px 0;">"${item.pesan}"</p>
+          <div style="text-align:right;">
+            <button onclick="selesaiBug('${id}')" style="background:#ea580c; color:white; border:none; padding:3px 8px; border-radius:4px; font-size:10px; font-weight:bold; cursor:pointer;">Selesai Perbaiki ✅</button>
+          </div>
+        </div>`;
+    });
+  });
+}
+
+window.selesaiBug = async (bugId) => {
+  if (confirm("Tandai laporan bug ini sudah diperbaiki/selesai?")) {
+    await db.collection("report_bugs").doc(bugId).delete();
+    alert("Laporan bug dihapus dari daftar.");
+  }
+};
 
 // MEMINDAHKAN TRANSAKSI KE BERKAS SAMPAH
 window.moveToTrashKas = async (kasId) => {
@@ -288,7 +473,6 @@ function listenSampahKas() {
   });
 }
 
-// PULIHKAN DATA KAS (KHUSUS ADMIN)
 window.restoreKas = async (sampahId) => {
   if (confirm("Pulihkan transaksi ini kembali ke Kas Utama?")) {
     const doc = await db.collection("sampah_kas").doc(sampahId).get();
@@ -303,7 +487,6 @@ window.restoreKas = async (sampahId) => {
   }
 };
 
-// HAPUS PERMANEN (KHUSUS ADMIN)
 window.deletePermanenKas = async (sampahId) => {
   if (confirm("HAPUS PERMANEN? Data ini tidak bisa dikembalikan lagi!")) {
     await db.collection("sampah_kas").doc(sampahId).delete();
@@ -311,7 +494,7 @@ window.deletePermanenKas = async (sampahId) => {
   }
 };
 
-// LOGIKA MULTI REKENING & QRIS (DENGAN HANDLER GAMBAR PECAH)
+// MULTI REKENING & QRIS
 function listenMultiRekening() {
   db.collection("rekening").orderBy("created_at", "asc").onSnapshot((snapshot) => {
     const container = document.getElementById("list-rekening");
@@ -361,7 +544,7 @@ window.deleteRekening = async (rekId) => {
   }
 };
 
-// LOGIKA BERITA ACARA
+// BERITA ACARA
 function listenBeritaAcara() {
   db.collection("acara").orderBy("created_at", "desc").onSnapshot((snapshot) => {
     const container = document.getElementById("list-acara");
@@ -423,7 +606,7 @@ window.submitAbsen = async (acaraId, status) => {
   alert(`Absensi disimpan: ${status}`);
 };
 
-// LOGIKA VERIFIKASI SETORAN PENDING
+// VERIFIKASI SETORAN PENDING
 function listenSetoranPending() {
   const container = document.getElementById("list-verifikasi");
   const section = document.getElementById("section-verifikasi");
@@ -599,6 +782,21 @@ if (document.getElementById("btn-admin-qris")) {
   };
 }
 
+if (document.getElementById("btn-admin-banner")) {
+  document.getElementById("btn-admin-banner").onclick = () => {
+    activeModalType = "banner";
+    modalTitle.innerText = "Tambah Banner Promo / Informasi";
+    modalShareWA.classList.add("hidden");
+    modalFields.innerHTML = `
+      <div class="form-group"><label>Judul / Teks Caption Banner</label><input type="text" id="m-banner-caption" placeholder="Contoh: Agenda Makrab MI25 Pekan Depan!" required class="form-control"></div>
+      <div class="form-group">
+        <label>Upload Foto Banner dari HP</label>
+        <input type="file" id="m-banner-file" accept="image/*" class="form-control">
+      </div>`;
+    modalContainer.classList.remove("hidden");
+  };
+}
+
 if (modalForm) {
   modalForm.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -702,6 +900,24 @@ if (modalForm) {
       } else {
         await simpanKeDb(qrisUrl);
       }
+
+    } else if (activeModalType === "banner") {
+      const caption = document.getElementById("m-banner-caption").value;
+      const fileInput = document.getElementById("m-banner-file").files[0];
+
+      if (!fileInput) { alert("Pilih foto banner!"); return; }
+
+      const reader = new FileReader();
+      reader.onload = async function(evt) {
+        await db.collection("banners").add({
+          caption: caption,
+          imageUrl: evt.target.result,
+          created_at: new Date().toISOString()
+        });
+        modalContainer.classList.add("hidden");
+        alert("Banner berhasil ditambahkan!");
+      };
+      reader.readAsDataURL(fileInput);
     }
   });
 }
